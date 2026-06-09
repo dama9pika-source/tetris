@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<title>Tetris</title>
+<style>
+  body { background:#111; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; margin:0; font-family:monospace; color:#fff; gap:12px; }
+  h1 { color:#fff; font-size:22px; letter-spacing:4px; }
+  #wrap { display:flex; gap:20px; align-items:flex-start; }
+  canvas { border:1px solid #333; }
+  #side { width:100px; display:flex; flex-direction:column; gap:16px; }
+  .box { background:#1a1a1a; border:1px solid #333; border-radius:6px; padding:10px; }
+  .box label { font-size:11px; color:#666; display:block; margin-bottom:4px; }
+  .box strong { font-size:20px; color:#fff; }
+  #next { background:#1a1a1a; border:1px solid #333; border-radius:6px; padding:10px; }
+  #next label { font-size:11px; color:#666; display:block; margin-bottom:6px; }
+  p { font-size:12px; color:#555; text-align:center; }
+</style>
+</head>
+<body>
+<h1>TETRIS</h1>
+<div id="wrap">
+  <canvas id="c" width="200" height="400"></canvas>
+  <div id="side">
+    <div id="next"><label>Neste</label><canvas id="cn" width="80" height="80"></canvas></div>
+    <div class="box"><label>Poeng</label><strong id="score">0</strong></div>
+    <div class="box"><label>Linjer</label><strong id="lines">0</strong></div>
+    <div class="box"><label>Nivå</label><strong id="level">1</strong></div>
+  </div>
+</div>
+<p>← → flytt &nbsp; ↑ roter &nbsp; ↓ raskere &nbsp; Space fall &nbsp; R start på nytt</p>
+
+<script>
+const C = document.getElementById('c'), ctx = C.getContext('2d');
+const CN = document.getElementById('cn'), ctxN = CN.getContext('2d');
+const T = 20, COLS = 10, ROWS = 20;
+
+const SHAPES = [
+  [[1,1,1,1]],
+  [[1,1],[1,1]],
+  [[0,1,0],[1,1,1]],
+  [[1,0,0],[1,1,1]],
+  [[0,0,1],[1,1,1]],
+  [[0,1,1],[1,1,0]],
+  [[1,1,0],[0,1,1]],
+];
+const COLORS = ['#00bcd4','#ffeb3b','#9c27b0','#ff9800','#2196f3','#4caf50','#f44336'];
+
+let board, piece, next, score, lines, level, alive, dropTimer, dropSpeed;
+
+function newBoard() { return Array.from({length:ROWS}, () => Array(COLS).fill(0)); }
+
+function randPiece() {
+  const i = Math.floor(Math.random() * SHAPES.length);
+  return { shape: SHAPES[i].map(r=>[...r]), color: COLORS[i], x: 3, y: 0 };
+}
+
+function start() {
+  board = newBoard();
+  score = lines = 0; level = 1; alive = true; dropTimer = 0; dropSpeed = 800;
+  piece = randPiece();
+  next = randPiece();
+  updateHUD();
+}
+
+function fits(sh, ox, oy) {
+  for (let r = 0; r < sh.length; r++)
+    for (let c = 0; c < sh[r].length; c++)
+      if (sh[r][c]) {
+        const nx = ox+c, ny = oy+r;
+        if (nx<0||nx>=COLS||ny>=ROWS) return false;
+        if (ny>=0 && board[ny][nx]) return false;
+      }
+  return true;
+}
+
+function rotate(sh) {
+  return sh[0].map((_,i) => sh.map(r=>r[i]).reverse());
+}
+
+function place() {
+  piece.shape.forEach((r,ri) => r.forEach((v,ci) => {
+    if (v && piece.y+ri >= 0) board[piece.y+ri][piece.x+ci] = piece.color;
+  }));
+  // fjern fulle linjer
+  let cleared = 0;
+  for (let r = ROWS-1; r >= 0; r--) {
+    if (board[r].every(c=>c)) { board.splice(r,1); board.unshift(Array(COLS).fill(0)); cleared++; r++; }
+  }
+  if (cleared) {
+    const pts = [0,100,300,500,800][cleared] * level;
+    score += pts; lines += cleared;
+    level = Math.floor(lines/10)+1;
+    dropSpeed = Math.max(100, 800 - (level-1)*80);
+  }
+  piece = next; next = randPiece();
+  if (!fits(piece.shape, piece.x, piece.y)) alive = false;
+  updateHUD();
+}
+
+function updateHUD() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('lines').textContent = lines;
+  document.getElementById('level').textContent = level;
+}
+
+function drawBoard() {
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,C.width,C.height);
+  // grid
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.5;
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    ctx.strokeRect(c*T,r*T,T,T);
+    if (board[r][c]) { ctx.fillStyle=board[r][c]; ctx.fillRect(c*T+1,r*T+1,T-2,T-2); }
+  }
+}
+
+function drawPiece(p, cx, cy, size, context) {
+  p.shape.forEach((r,ri) => r.forEach((v,ci) => {
+    if (v) {
+      context.fillStyle = p.color;
+      context.fillRect(cx+ci*size+1, cy+ri*size+1, size-2, size-2);
+    }
+  }));
+}
+
+function drawGhost() {
+  let gy = piece.y;
+  while (fits(piece.shape, piece.x, gy+1)) gy++;
+  ctx.globalAlpha = 0.2;
+  drawPiece({...piece, y:gy}, piece.x*T, gy*T, T, ctx);
+  ctx.globalAlpha = 1;
+}
+
+function drawNext() {
+  ctxN.fillStyle = '#1a1a1a'; ctxN.fillRect(0,0,80,80);
+  const s = 16;
+  const ox = Math.floor((80 - next.shape[0].length*s)/2);
+  const oy = Math.floor((80 - next.shape.length*s)/2);
+  drawPiece(next, ox, oy, s, ctxN);
+}
+
+function draw() {
+  drawBoard();
+  drawGhost();
+  drawPiece(piece, piece.x*T, piece.y*T, T, ctx);
+  drawNext();
+  if (!alive) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,C.width,C.height);
+    ctx.fillStyle = '#f44336'; ctx.font = 'bold 20px monospace'; ctx.textAlign='center';
+    ctx.fillText('Spill over!', C.width/2, C.height/2-20);
+    ctx.fillStyle='#fff'; ctx.font='14px monospace';
+    ctx.fillText('Poeng: '+score, C.width/2, C.height/2+6);
+    ctx.fillStyle='#666'; ctx.font='12px monospace';
+    ctx.fillText('R = start på nytt', C.width/2, C.height/2+28);
+    ctx.textAlign='left';
+  }
+}
+
+let last = 0;
+function loop(ts) {
+  if (alive) {
+    dropTimer += ts - last;
+    if (dropTimer >= dropSpeed) {
+      dropTimer = 0;
+      if (fits(piece.shape, piece.x, piece.y+1)) piece.y++;
+      else place();
+    }
+  }
+  last = ts; draw();
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('keydown', e => {
+  if (!alive) { if(e.key==='r'||e.key==='R') start(); return; }
+  if (e.key==='ArrowLeft')  { if(fits(piece.shape,piece.x-1,piece.y)) piece.x--; }
+  if (e.key==='ArrowRight') { if(fits(piece.shape,piece.x+1,piece.y)) piece.x++; }
+  if (e.key==='ArrowDown')  { if(fits(piece.shape,piece.x,piece.y+1)) piece.y++; else place(); }
+  if (e.key==='ArrowUp') {
+    const r = rotate(piece.shape);
+    if (fits(r,piece.x,piece.y)) piece.shape=r;
+    else if (fits(r,piece.x+1,piece.y)) { piece.shape=r; piece.x++; }
+    else if (fits(r,piece.x-1,piece.y)) { piece.shape=r; piece.x--; }
+  }
+  if (e.key===' ') {
+    e.preventDefault();
+    while(fits(piece.shape,piece.x,piece.y+1)) piece.y++;
+    place();
+  }
+  if (e.key==='r'||e.key==='R') start();
+});
+
+start();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
